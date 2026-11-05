@@ -1,0 +1,10 @@
+funcion factorial(n) {
+    si n <= 1 {
+        devolver 1;
+    }
+    devolver n * factorial(n - 1);
+}
+
+para k en 0..6 {
+    mostrar k, factorial(k);
+}

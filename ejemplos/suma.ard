@@ -1,0 +1,8 @@
+// Somme des entiers de 1 à 10
+var total = 0;
+var i = 1;
+mientras i <= 10 {
+    total = total + i;
+    i = i + 1;
+}
+mostrar "suma:", total;

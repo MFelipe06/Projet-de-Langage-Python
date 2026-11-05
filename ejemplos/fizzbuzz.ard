@@ -1,0 +1,15 @@
+funcion clasificar(n) {
+    si n % 15 == 0 {
+        devolver "FizzBuzz";
+    } sino si n % 3 == 0 {
+        devolver "Fizz";
+    } sino si n % 5 == 0 {
+        devolver "Buzz";
+    } sino {
+        devolver n;
+    }
+}
+
+para i en 1..16 {
+    mostrar clasificar(i);
+}
