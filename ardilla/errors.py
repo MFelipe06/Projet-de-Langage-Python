@@ -19,3 +19,8 @@ class ArdillaError(Exception):
 
 class LexError(ArdillaError):
     """Erreur lexicale : la source contient quelque chose qui n'est pas un token."""
+
+
+class ParseError(ArdillaError):
+    """Erreur syntaxique : les tokens ne forment pas une phrase valide."""
+    
