@@ -18,18 +18,31 @@ from enum import IntEnum
 from typing import NamedTuple
 
 from ardilla.ast_nodes import (
+    Asignacion,
     Binario,
     BinaryOperator,
+    Bloque,
     Booleano,
     Cadena,
+    Declaracion,
+    Devolver,
     Entero,
+    ExpresionInstruccion,
     Expression,
+    Funcion,
     Llamada,
+    Mientras,
+    Mostrar,
+    Para,
+    Programa,
+    ProgramItem,
+    Si,
+    Statement,
     Unario,
     UnaryOperator,
     Variable,
 )
-from ardilla.errors import ParseError
+from ardilla.errors import ParseError, ParseErrors
 from ardilla.lexer import tokenize
 from ardilla.tokens import Token, TokenType
 
@@ -130,6 +143,7 @@ class Parser:
         if not self._tokens or self._tokens[-1].type is not TokenType.FIN:
             raise ValueError("la liste de tokens doit se terminer par FIN")
         self._index = 0
+        self._errors: list[ParseError] = []
 
     # -- Navigation --
 
@@ -146,6 +160,10 @@ class Parser:
 
     def check(self, token_type: TokenType) -> bool:
         return self.peek().type is token_type
+
+    def peek_next(self) -> Token:
+        """Retourne le token suivant sans le consommer."""
+        return self._tokens[min(self._index + 1, len(self._tokens) - 1)]
 
     def match(self, token_type: TokenType) -> Token | None:
         """Consomme le token courant s'il est de ce type, sinon retourne None."""
@@ -165,6 +183,208 @@ class Parser:
             raise self.missing(
                 f"opérateur ou fin de l'expression attendu, trouvé {_describe(self.peek())}"
             )
+
+    # -- Programmes et instructions --
+
+    def parse_program(self) -> Programa:
+        """Analyse un programme et collecte les erreurs syntaxiques récupérables."""
+        self._errors = []
+        items: list[ProgramItem] = []
+        start = self.peek()
+
+        while not self.check(TokenType.FIN):
+            previous_index = self._index
+            try:
+                if self.check(TokenType.FUNCION):
+                    items.append(self.parse_function())
+                else:
+                    items.append(self.parse_statement())
+            except ParseError as error:
+                self._errors.append(error)
+                self._synchronize(stop_at_function=True, stop_at_block_end=False)
+                if self._index == previous_index and not self.check(TokenType.FIN):
+                    self.advance()
+
+        if self._errors:
+            errors = tuple(self._errors)
+            raise ParseErrors(errors) from errors[0]
+
+        return Programa(items=tuple(items), line=start.line, column=start.column)
+
+    def parse_function(self) -> Funcion:
+        function_token = self.expect(TokenType.FUNCION, "'funcion'")
+        name = self.expect(TokenType.IDENT, "nom de fonction")
+        self.expect(TokenType.PAREN_IZQ, "'('")
+
+        parameters: list[str] = []
+        if not self.check(TokenType.PAREN_DER):
+            parameters.append(self.expect(TokenType.IDENT, "paramètre").lexeme)
+            while self.match(TokenType.COMA):
+                parameters.append(self.expect(TokenType.IDENT, "paramètre").lexeme)
+
+        self.expect(TokenType.PAREN_DER, "')'")
+        body = self.parse_block()
+        return Funcion(
+            name=name.lexeme,
+            parameters=tuple(parameters),
+            body=body,
+            line=function_token.line,
+            column=function_token.column,
+        )
+
+    def parse_block(self) -> Bloque:
+        opening = self.expect(TokenType.LLAVE_IZQ, "'{'")
+        statements: list[Statement] = []
+
+        while not self.check(TokenType.FIN) and not self.check(TokenType.LLAVE_DER):
+            previous_index = self._index
+            try:
+                statements.append(self.parse_statement())
+            except ParseError as error:
+                self._errors.append(error)
+                self._synchronize(stop_at_function=False, stop_at_block_end=True)
+                if self._index == previous_index and not self.check(
+                    TokenType.LLAVE_DER
+                ):
+                    self.advance()
+
+        self.expect(TokenType.LLAVE_DER, "'}'")
+        return Bloque(
+            statements=tuple(statements),
+            line=opening.line,
+            column=opening.column,
+        )
+
+    def parse_statement(self) -> Statement:
+        token = self.peek()
+        if token.type is TokenType.VAR:
+            return self.parse_declaration()
+        if token.type is TokenType.IDENT and self.peek_next().type is TokenType.ASIGNAR:
+            return self.parse_assignment()
+        if token.type is TokenType.SI:
+            return self.parse_if()
+        if token.type is TokenType.MIENTRAS:
+            return self.parse_while()
+        if token.type is TokenType.PARA:
+            return self.parse_for()
+        if token.type is TokenType.DEVOLVER:
+            return self.parse_return()
+        if token.type is TokenType.MOSTRAR:
+            return self.parse_print()
+
+        expression = self.parse_expression()
+        self.expect(TokenType.PUNTO_Y_COMA, "';'")
+        return ExpresionInstruccion(
+            expression=expression,
+            line=expression.line,
+            column=expression.column,
+        )
+
+    def parse_declaration(self) -> Declaracion:
+        start = self.advance()
+        name = self.expect(TokenType.IDENT, "nom de variable")
+        self.expect(TokenType.ASIGNAR, "'='")
+        value = self.parse_expression()
+        self.expect(TokenType.PUNTO_Y_COMA, "';'")
+        return Declaracion(
+            name=name.lexeme,
+            value=value,
+            line=start.line,
+            column=start.column,
+        )
+
+    def parse_assignment(self) -> Asignacion:
+        name = self.advance()
+        self.expect(TokenType.ASIGNAR, "'='")
+        value = self.parse_expression()
+        self.expect(TokenType.PUNTO_Y_COMA, "';'")
+        return Asignacion(
+            name=name.lexeme,
+            value=value,
+            line=name.line,
+            column=name.column,
+        )
+
+    def parse_if(self) -> Si:
+        start = self.advance()
+        condition = self.parse_expression()
+        then_branch = self.parse_block()
+        else_branch: Bloque | Si | None = None
+
+        if self.match(TokenType.SINO):
+            if self.check(TokenType.SI):
+                else_branch = self.parse_if()
+            else:
+                else_branch = self.parse_block()
+
+        return Si(
+            condition=condition,
+            then_branch=then_branch,
+            else_branch=else_branch,
+            line=start.line,
+            column=start.column,
+        )
+
+    def parse_while(self) -> Mientras:
+        start = self.advance()
+        condition = self.parse_expression()
+        body = self.parse_block()
+        return Mientras(
+            condition=condition,
+            body=body,
+            line=start.line,
+            column=start.column,
+        )
+
+    def parse_for(self) -> Para:
+        start = self.advance()
+        variable = self.expect(TokenType.IDENT, "variable de boucle")
+        self.expect(TokenType.EN, "'en'")
+        first = self.parse_expression()
+        self.expect(TokenType.RANGO, "'..'")
+        stop = self.parse_expression()
+        body = self.parse_block()
+        return Para(
+            variable=variable.lexeme,
+            start=first,
+            stop=stop,
+            body=body,
+            line=start.line,
+            column=start.column,
+        )
+
+    def parse_return(self) -> Devolver:
+        start = self.advance()
+        value = None if self.check(TokenType.PUNTO_Y_COMA) else self.parse_expression()
+        self.expect(TokenType.PUNTO_Y_COMA, "';'")
+        return Devolver(value=value, line=start.line, column=start.column)
+
+    def parse_print(self) -> Mostrar:
+        start = self.advance()
+        arguments: list[Expression] = []
+        if not self.check(TokenType.PUNTO_Y_COMA):
+            arguments.append(self.parse_expression())
+            while self.match(TokenType.COMA):
+                arguments.append(self.parse_expression())
+        self.expect(TokenType.PUNTO_Y_COMA, "';'")
+        return Mostrar(
+            arguments=tuple(arguments),
+            line=start.line,
+            column=start.column,
+        )
+
+    def _synchronize(
+        self, *, stop_at_function: bool, stop_at_block_end: bool
+    ) -> None:
+        """Saute les tokens fautifs jusqu'à `;`, `}` ou une fonction suivante."""
+        while not self.check(TokenType.FIN):
+            if stop_at_block_end and self.check(TokenType.LLAVE_DER):
+                return
+            if stop_at_function and self.check(TokenType.FUNCION):
+                return
+            if self.match(TokenType.PUNTO_Y_COMA):
+                return
+            self.advance()
 
     # -- Erreurs --
 
@@ -338,3 +558,8 @@ def parse_expression_source(source: str) -> Expression:
     expression = parser.parse_expression()
     parser.expect_end()
     return expression
+
+
+def parse_source(source: str) -> Programa:
+    """Analyse un programme complet écrit en Ardilla."""
+    return Parser(tokenize(source)).parse_program()

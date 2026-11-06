@@ -23,4 +23,21 @@ class LexError(ArdillaError):
 
 class ParseError(ArdillaError):
     """Erreur syntaxique : les tokens ne forment pas une phrase valide."""
+
+
+class ParseErrors(ParseError):
+    """Plusieurs erreurs syntaxiques trouvées pendant l'analyse d'un programme."""
+
+    def __init__(self, errors: tuple[ParseError, ...]) -> None:
+        if not errors:
+            raise ValueError("au moins une ParseError est nécessaire")
+        first = errors[0]
+        self.errors = errors
+        super().__init__(
+            f"{len(errors)} erreur(s) syntaxique(s)", first.line, first.column
+        )
+
+    def __str__(self) -> str:
+        details = "\n".join(f"  - {error}" for error in self.errors)
+        return f"{self.message} :\n{details}"
     

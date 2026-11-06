@@ -128,6 +128,11 @@ Les parenthèses regroupent une expression.
 6. Appeler une fonction inexistante, ou avec un mauvais nombre d'arguments, est une erreur.
 7. `devolver` n'est autorisé que dans une fonction.
 
+L'analyse sémantique collecte les erreurs de noms et de portée, puis les lève
+ensemble dans une `SemanticErrors`. Les déclarations de fonctions sont
+enregistrées avant l'analyse des instructions, ce qui autorise les appels
+récursifs et les appels vers une fonction déclarée plus loin dans le fichier.
+
 ---
 
 ## 7. Grammaire EBNF
@@ -249,11 +254,50 @@ mostrar "suma:", total;
 
 Sortie : `suma: 55`
 
+### Génération Python
+
+L'étape 8 traduit l'AST en Python sans utiliser le module `ast` :
+
+- `verdadero` et `falso` deviennent `True` et `False` ;
+- `no`, `y` et `o` deviennent `not`, `and` et `or` ;
+- `/` devient `//`, conformément à la division entière du langage ;
+- `para` devient une boucle sur `range(debut, fin)`, avec borne droite exclue ;
+- les fonctions et les variables reçoivent des noms Python internes ;
+- `mostrar` et `para` utilisent explicitement les fonctions intégrées de Python,
+  pour éviter les collisions avec des noms Ardilla comme `print` et `range`.
+
+Les noms internes distincts pour chaque déclaration préservent aussi les
+portées lexicales d'Ardilla, car les blocs Python `if` et `while` ne créent pas
+de portée de variables.
+
+## 9. CLI et REPL
+
+Le paquet se lance depuis la racine du projet :
+
+```bash
+python -m ardilla run ejemplos/factorial.ard
+python -m ardilla compile ejemplos/factorial.ard
+python -m ardilla format ejemplos/factorial.ard
+python -m ardilla repl
+```
+
+Le REPL accepte un programme sur plusieurs lignes. Une ligne vide ou `:run`
+compile et exécute la cellule, qui partage les variables et fonctions des
+cellules précédentes. `:help` affiche l'aide, et `:quit` quitte le REPL. Les
+erreurs lexicales, syntaxiques et sémantiques d'une cellule ne remplacent pas
+l'état déjà compilé.
+
+L'étape 10 ajoute un contrat `Backend` basé sur `Protocol`; `PythonBackend`
+est son implémentation par défaut. La fonction de formatage reconstruit un
+source Ardilla canonique depuis l'AST. Les commentaires, qui ne sont pas
+représentés dans l'AST, ne sont pas conservés.
+
 ---
 
 ## 9. Erreurs attendues
 
 Chaque erreur porte une position `ligne:colonne` (à partir de 1) et un message clair.
+Le parser collecte les erreurs syntaxiques et reprend l'analyse après `;` ou `}`.
 
 | Phase | Détectée par | Programme | Erreur attendue |
 |---|---|---|---|
@@ -265,12 +309,10 @@ Chaque erreur porte une position `ligne:colonne` (à partir de 1) et un message 
 
 ## 10. Points ouverts
 
-À trancher avec l'enseignant ou avant l'étape 8 :
+À trancher avec l'enseignant :
 
-- **Affichage des booléens** : `mostrar verdadero;` écrit-il `verdadero` ou `True` ?
 - **Division par zéro** : erreur d'exécution Python, ou erreur Ardilla dédiée ?
 - **Types mélangés** : `"a" + 1` est-il une erreur sémantique ou d'exécution ?
-- **Collision de noms** : une fonction appelée `print` ou `range` entre en conflit avec Python. Interdire ou renommer à la génération ?
 
 ---
 
